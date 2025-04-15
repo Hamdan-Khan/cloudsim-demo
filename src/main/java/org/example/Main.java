@@ -64,9 +64,6 @@ public class Main {
         // Enable logging events for DDoS analysis
         // simulation.terminateAt(100);
 
-        // Create Datacenter with monitoring
-        Datacenter datacenter = createDatacenter(simulation);
-
         // Create a broker
         DatacenterBroker broker = new DatacenterBrokerSimple(simulation);
 
@@ -78,11 +75,6 @@ public class Main {
 
         // NEW CODE: Filter requests using AI model
         List<Cloudlet> filteredRequests = filterMaliciousRequests(allRequests);
-
-        // Extract cloudlets from request details
-        // List<Cloudlet> filteredCloudlets = filteredRequests.stream()
-        //        .map(RequestDetails::getCloudlet)
-        //        .collect(Collectors.toList());
 
         // Submit VMs and filtered cloudlets to the broker
         broker.submitVmList(vmList);
