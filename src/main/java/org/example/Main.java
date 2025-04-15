@@ -30,7 +30,7 @@ public class Main {
     // Number of attack sources (DDoS attackers)
     private static final int ATTACK_SOURCES = 1;
     // Number of requests per attacker
-    private static final int REQUESTS_PER_ATTACKER = 5000;
+    private static final int REQUESTS_PER_ATTACKER = 10;
     // Total number of cloudlets (requests)
     private static final int TOTAL_CLOUDLETS = LEGITIMATE_USERS + (ATTACK_SOURCES * REQUESTS_PER_ATTACKER);
     private static Datacenter datacenter;
@@ -62,7 +62,7 @@ public class Main {
         CloudSimPlus simulation = new CloudSimPlus();
 
         // Enable logging events for DDoS analysis
-        simulation.terminateAt(100);
+        // simulation.terminateAt(100);
 
         // Create Datacenter with monitoring
         Datacenter datacenter = createDatacenter(simulation);
@@ -73,15 +73,23 @@ public class Main {
         // Create VMs
         List<Vm> vmList = createVms(2); // Create 2 VMs to serve requests
 
-        // Create cloudlets (both legitimate and attack requests)
-        List<Cloudlet> cloudletList = createCloudlets();
+        // Create all cloudlets (both legitimate and attack requests)
+        List<RequestDetails> allRequests = createCloudlets();
 
-        // Submit VMs and cloudlets to the broker
+        // NEW CODE: Filter requests using AI model
+        List<Cloudlet> filteredRequests = filterMaliciousRequests(allRequests);
+
+        // Extract cloudlets from request details
+        // List<Cloudlet> filteredCloudlets = filteredRequests.stream()
+        //        .map(RequestDetails::getCloudlet)
+        //        .collect(Collectors.toList());
+
+        // Submit VMs and filtered cloudlets to the broker
         broker.submitVmList(vmList);
-        broker.submitCloudletList(cloudletList);
+        broker.submitCloudletList(filteredRequests);
 
         // Add a listener to track resource utilization during the DDoS attack
-        simulation.addOnClockTickListener(Main::monitorResources);
+        // simulation.addOnClockTickListener(Main::monitorResources);
 
         // Start the simulation
         System.out.println("Starting DDoS attack simulation with " + LEGITIMATE_USERS + " legitimate users and "
@@ -180,16 +188,46 @@ public class Main {
         return vmList;
     }
 
-    private static List<Cloudlet> createCloudlets() {
-        List<Cloudlet> cloudletList = new ArrayList<>();
+    public static class RequestDetails {
+        private final int id;
+        private final Cloudlet cloudlet;
+        private final int sourceId;
+        private final boolean isAttack;
+
+        public RequestDetails(int id, Cloudlet cloudlet, int sourceId, boolean isAttack) {
+            this.id = id;
+            this.cloudlet = cloudlet;
+            this.sourceId = sourceId;
+            this.isAttack = isAttack;
+        }
+
+        public int getId() { return id; }
+        public Cloudlet getCloudlet() { return cloudlet; }
+        public int getSourceId() { return sourceId; }
+        public boolean isAttack() { return isAttack; }
+    }
+
+    private static List<RequestDetails> createCloudlets() {
+        List<RequestDetails> requestList = new ArrayList<>();
+        int cloudletId = 0;
 
         // Create legitimate user requests (will have lower IDs)
         for (int i = 0; i < LEGITIMATE_USERS; i++) {
-            Cloudlet cloudlet = new CloudletSimple(LEGITIMATE_LENGTH, LEGITIMATE_PES);
+            Cloudlet cloudlet = new CloudletSimple(cloudletId, LEGITIMATE_LENGTH, LEGITIMATE_PES);
             cloudlet.setUtilizationModelCpu(new UtilizationModelFull());
             cloudlet.setUtilizationModelRam(new UtilizationModelDynamic(0.2));
             cloudlet.setUtilizationModelBw(new UtilizationModelDynamic(0.1));
-            cloudletList.add(cloudlet);
+
+            // Create request details with metadata
+            RequestDetails request = new RequestDetails(
+                    cloudletId,
+                    cloudlet,
+                    i,  // sourceId (user ID)
+                    false // not an attack
+            );
+
+            requestList.add(request);
+            cloudletId++;
         }
 
         // Create a massive amount of attack requests (DDoS)
@@ -198,8 +236,7 @@ public class Main {
             for (int j = 0; j < REQUESTS_PER_ATTACKER; j++) {
                 // Small variation in attack request size to simulate real attack patterns
                 int length = ATTACK_LENGTH + random.nextInt(1000);
-
-                Cloudlet cloudlet = new CloudletSimple(length, ATTACK_PES);
+                Cloudlet cloudlet = new CloudletSimple(cloudletId, length, ATTACK_PES);
                 cloudlet.setUtilizationModelCpu(new UtilizationModelFull());
                 cloudlet.setUtilizationModelRam(new UtilizationModelDynamic(0.1));
                 cloudlet.setUtilizationModelBw(new UtilizationModelDynamic(0.1));
@@ -209,11 +246,20 @@ public class Main {
                 cloudlet.addOnStartListener(event ->
                         onAttackRequestStarted(event, attackerId));
 
-                cloudletList.add(cloudlet);
+                // Create request details with metadata
+                RequestDetails request = new RequestDetails(
+                        cloudletId,
+                        cloudlet,
+                        i + LEGITIMATE_USERS,  // sourceId (attacker ID)
+                        true  // is an attack
+                );
+
+                requestList.add(request);
+                cloudletId++;
             }
         }
 
-        return cloudletList;
+        return requestList;
     }
 
     private static void onAttackRequestStarted(CloudletVmEventInfo info, int attackerId) {
@@ -221,5 +267,45 @@ public class Main {
             System.out.printf("Time %.2f: Attack request %d from attacker %d started execution on VM %d\n",
                     info.getTime(), info.getCloudlet().getId(), attackerId, info.getVm().getId());
         }
+    }
+
+    private static List<Cloudlet> filterMaliciousRequests(List<RequestDetails> allRequests) {
+        List<Cloudlet> filteredCloudlets = new ArrayList<>();
+        int blockedRequests = 0;
+
+        for (RequestDetails request : allRequests) {
+            boolean isMalicious = detectMaliciousRequest(request);
+
+            if (!isMalicious) {
+                filteredCloudlets.add(request.getCloudlet());
+            } else {
+                blockedRequests++;
+            }
+        }
+
+        System.out.println("AI filter blocked " + blockedRequests + " potentially malicious requests");
+        return filteredCloudlets;
+    }
+
+    // detection implementation
+    private static boolean detectMaliciousRequest(RequestDetails request) {
+        // can use patterns like:
+        // 1. Request pattern (frequency from same source)
+        // 2. Request size and resource demands
+        // 3. Historical behavior patterns
+        // 4. Content analysis of request
+
+        // For demonstration, we are using the sourceId
+        // hardcoded right now
+        int id = request.getId();
+        int sourceId = request.getSourceId();
+        Cloudlet cloudlet = request.getCloudlet();
+
+        System.out.println("Analyzing request - ID: " + id +
+                ", Source: " + sourceId +
+                ", Cloudlet length: " + cloudlet.getLength());
+
+        // todo: detection logic
+        return sourceId >= LEGITIMATE_USERS;
     }
 }
