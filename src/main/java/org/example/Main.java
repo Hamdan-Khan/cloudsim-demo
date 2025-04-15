@@ -62,9 +62,9 @@ public class Main {
         // Generate training data if needed
         // generateTrainingData(2000);
 
-        // Train model
-        // WekaTrainer trainer = new WekaTrainer();
-        // trainer.trainModelWithWeka();
+         // Train model
+//         WekaTrainer trainer = new WekaTrainer();
+//         trainer.trainModelWithWeka();
 
         // Initialize the CloudSim Plus simulation
         CloudSimPlus simulation = new CloudSimPlus();
@@ -288,7 +288,7 @@ public class Main {
                         5000 + random.nextInt(2000),  // large payload
                         null,  // no session
                         false , // no valid credentials
-                        false
+                        true
                 );
 
                 requestList.add(request);

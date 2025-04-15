@@ -11,9 +11,13 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Logger;
+import java.util.logging.Level;
 import org.example.Main.*;
 
 public class WekaDetector {
+    private static final Logger LOGGER = Logger.getLogger(WekaDetector.class.getName());
+
     // Time windows for analysis (in simulation time units)
     private static final double SHORT_WINDOW = 1.0;
     private static final double MEDIUM_WINDOW = 10.0;
@@ -32,8 +36,17 @@ public class WekaDetector {
 
     public WekaDetector() {
         try {
+            LOGGER.info("Initializing WekaDetector...");
+
             // Load model
-            model = (RandomForest) SerializationHelper.read("ddos_model.model");
+            File modelFile = new File("ddos_model.model");
+            if (!modelFile.exists()) {
+                LOGGER.severe("Model file not found: " + modelFile.getAbsolutePath());
+                throw new RuntimeException("Model file not found");
+            }
+
+            model = (RandomForest) SerializationHelper.read(modelFile.getPath());
+            LOGGER.info("Loaded Random Forest model");
 
             // Create empty dataset with same structure for prediction
             CSVLoader loader = new CSVLoader();
@@ -41,8 +54,11 @@ public class WekaDetector {
             dataHeader = loader.getDataSet();
             dataHeader.setClassIndex(dataHeader.numAttributes() - 1);
 
+            LOGGER.info("Initialized with " + dataHeader.numAttributes() + " attributes");
+
         } catch (Exception e) {
-            throw new RuntimeException("Failed to load model", e);
+            LOGGER.log(Level.SEVERE, "Failed to initialize detector", e);
+            throw new RuntimeException("Failed to initialize detector", e);
         }
     }
 
@@ -51,28 +67,37 @@ public class WekaDetector {
             // Update analytics with new request
             updateAnalytics(request, currentTime);
 
-            // Extract features
+            // Extract features in the same order as training data
             double sourceRate = calculateSourceRate(request.getSourceId(), currentTime);
             double systemRate = calculateSystemRate(currentTime);
             double payloadSize = request.getPayloadSize();
             double cpuDemand = request.getCloudlet().getUtilizationOfCpu(0);
             double bwDemand = request.getCloudlet().getUtilizationOfBw(0);
 
-            // Create instance
-            DenseInstance instance = new DenseInstance(6);
+            // Create instance with the correct number of attributes
+            DenseInstance instance = new DenseInstance(dataHeader.numAttributes());
+            instance.setDataset(dataHeader);
+
+            // Set attribute values in the same order as training data
             instance.setValue(0, sourceRate);
             instance.setValue(1, systemRate);
             instance.setValue(2, payloadSize);
             instance.setValue(3, cpuDemand);
             instance.setValue(4, bwDemand);
-            instance.setDataset(dataHeader);
 
             // Predict
             double[] distribution = model.distributionForInstance(instance);
-            return distribution[1] > 0.5; // if probability of attack > 0.5
+            boolean isAttack = distribution[1] > 0.5;
+
+            if (isAttack) {
+                LOGGER.info(String.format("Detected potential attack - Source: %d, Rate: %.2f, System Rate: %.2f",
+                        request.getSourceId(), sourceRate, systemRate));
+            }
+
+            return isAttack;
 
         } catch (Exception e) {
-            e.printStackTrace();
+            LOGGER.log(Level.SEVERE, "Error during attack detection", e);
             return false;
         }
     }
