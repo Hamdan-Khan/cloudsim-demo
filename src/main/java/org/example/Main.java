@@ -29,9 +29,9 @@ public class Main {
     // Number of legitimate users
     private static final int LEGITIMATE_USERS = 5;
     // Number of attack sources (DDoS attackers)
-    private static final int ATTACK_SOURCES = 1;
+    private static final int ATTACK_SOURCES = 10;
     // Number of requests per attacker
-    private static final int REQUESTS_PER_ATTACKER = 10;
+    private static final int REQUESTS_PER_ATTACKER = 50;
     // Total number of cloudlets (requests)
     private static final int TOTAL_CLOUDLETS = LEGITIMATE_USERS + (ATTACK_SOURCES * REQUESTS_PER_ATTACKER);
     private static Datacenter datacenter;
@@ -59,50 +59,54 @@ public class Main {
     private static final int ATTACK_PES = 1;
 
     public static void main(String[] args) {
+        // Generate training data if needed
         // generateTrainingData(2000);
 
-       // Initialize the CloudSim Plus simulation
-       CloudSimPlus simulation = new CloudSimPlus();
+        // Train model
+        // WekaTrainer trainer = new WekaTrainer();
+        // trainer.trainModelWithWeka();
 
-       // Create a broker
-       DatacenterBroker broker = new DatacenterBrokerSimple(simulation);
+        // Initialize the CloudSim Plus simulation
+        CloudSimPlus simulation = new CloudSimPlus();
 
-       // Create VMs
-       List<Vm> vmList = createVms(2); // Create 2 VMs to serve requests
+        // Create a broker
+        DatacenterBroker broker = new DatacenterBrokerSimple(simulation);
 
-       // Create all cloudlets (both legitimate and attack requests)
-       List<RequestDetails> allRequests = createCloudlets(simulation);
+        // Create VMs
+        List<Vm> vmList = createVms(2); // Create 2 VMs to serve requests
 
-       // Create DDoS detector
-       DDoSDetector detector = new DDoSDetector();
-       // SimpleDDoSDetector detector = new SimpleDDoSDetector();
+        // Create all cloudlets (both legitimate and attack requests)
+        List<RequestDetails> allRequests = createCloudlets(simulation);
 
-       // Filter requests using the detector
-       List<Cloudlet> filteredRequests = filterMaliciousRequests(allRequests, detector, simulation);
+        // Weka-based ML detector
+        WekaDetector detector = new WekaDetector();
 
-       // Submit VMs and filtered cloudlets to the broker
-       broker.submitVmList(vmList);
-       broker.submitCloudletList(filteredRequests);
+        // Filter requests using the detector
+        List<Cloudlet> filteredRequests = filterMaliciousRequests(allRequests, detector, simulation);
 
-       // Create Datacenter with monitoring
-       Datacenter datacenter = createDatacenter(simulation);
+        // Submit VMs and filtered cloudlets to the broker
+        broker.submitVmList(vmList);
+        broker.submitCloudletList(filteredRequests);
 
-       // Start the simulation
-       System.out.println("Starting DDoS attack simulation with " + LEGITIMATE_USERS + " legitimate users and "
-               + ATTACK_SOURCES + " attackers sending " + REQUESTS_PER_ATTACKER + " requests each.");
-       System.out.println("Total requests: " + TOTAL_CLOUDLETS);
-       simulation.start();
+        // Create Datacenter with monitoring
+        Datacenter datacenter = createDatacenter(simulation);
 
-       // Print results
-       List<Cloudlet> finishedCloudlets = broker.getCloudletFinishedList();
-       System.out.println("\nFinished requests: " + finishedCloudlets.size() + " out of " + TOTAL_CLOUDLETS);
+        // Start the simulation
+        System.out.println("Starting DDoS attack simulation with " + LEGITIMATE_USERS + " legitimate users and "
+                + ATTACK_SOURCES + " attackers sending " + REQUESTS_PER_ATTACKER + " requests each.");
+        System.out.println("Total requests: " + TOTAL_CLOUDLETS);
+        simulation.start();
 
-       // Calculate statistics for both legitimate and attack requests
-       calculateStatistics(finishedCloudlets);
+        // Print results
+        List<Cloudlet> finishedCloudlets = broker.getCloudletFinishedList();
+        System.out.println("\nFinished requests: " + finishedCloudlets.size() + " out of " + TOTAL_CLOUDLETS);
 
-       // Output detailed cloudlet information (limit to first 20 to avoid excessive output)
-       int outputLimit = Math.min(finishedCloudlets.size(), 20);
-       new CloudletsTableBuilder(finishedCloudlets.subList(0, outputLimit)).build();
+        // Calculate statistics for both legitimate and attack requests
+        calculateStatistics(finishedCloudlets);
+
+        // Output detailed cloudlet information (limit to first 20 to avoid excessive output)
+        int outputLimit = Math.min(finishedCloudlets.size(), 20);
+        new CloudletsTableBuilder(finishedCloudlets.subList(0, outputLimit)).build();
     }
 
     private static void calculateStatistics(List<Cloudlet> cloudlets) {
@@ -194,10 +198,11 @@ public class Main {
         private final int payloadSize;   // Size of request payload
         private final String sessionId;  // null for new sessions
         private final boolean hasValidCredentials; // Based on auth check
+        private final boolean isAttack;
 
         public RequestDetails(int id, Cloudlet cloudlet, int sourceId, double timestamp,
                               String requestPath, Map<String, String> headers,
-                              int payloadSize, String sessionId, boolean hasValidCredentials) {
+                              int payloadSize, String sessionId, boolean hasValidCredentials, boolean isAttack) {
             this.id = id;
             this.cloudlet = cloudlet;
             this.sourceId = sourceId;
@@ -207,12 +212,13 @@ public class Main {
             this.payloadSize = payloadSize;
             this.sessionId = sessionId;
             this.hasValidCredentials = hasValidCredentials;
+            this.isAttack = isAttack;
         }
 
         // Simple constructor for backward compatibility
-        public RequestDetails(int id, Cloudlet cloudlet, int sourceId) {
+        public RequestDetails(int id, Cloudlet cloudlet, int sourceId,boolean isAttack) {
             this(id, cloudlet, sourceId, System.currentTimeMillis() / 1000.0,
-                    "/default", new HashMap<>(), (int) cloudlet.getLength(), null, false);
+                    "/default", new HashMap<>(), (int) cloudlet.getLength(), null, false,isAttack);
         }
 
         public int getId() { return id; }
@@ -224,6 +230,7 @@ public class Main {
         public int getPayloadSize() { return payloadSize; }
         public String getSessionId() { return sessionId; }
         public boolean hasValidCredentials() { return hasValidCredentials; }
+        public boolean isAttack() { return isAttack; }
     }
 
     private static List<RequestDetails> createCloudlets(CloudSimPlus simulation) {
@@ -248,7 +255,8 @@ public class Main {
                     createLegitimateHeaders(),
                     1024 + (int)(Math.random() * 1000),  // payload size
                     "session-" + i,  // session ID
-                    true  // valid credentials
+                    true , // valid credentials
+                    false
             );
 
             requestList.add(request);
@@ -279,7 +287,8 @@ public class Main {
                         createAttackHeaders(),
                         5000 + random.nextInt(2000),  // large payload
                         null,  // no session
-                        false  // no valid credentials
+                        false , // no valid credentials
+                        false
                 );
 
                 requestList.add(request);
@@ -314,15 +323,34 @@ public class Main {
 
     private static List<Cloudlet> filterMaliciousRequests(
             List<RequestDetails> allRequests,
-            DDoSDetector detector,
+            Object detector,
             CloudSimPlus simulation) {
 
         List<Cloudlet> filteredCloudlets = new ArrayList<>();
         int blockedRequests = 0;
+        int falsePositives = 0;
+        int falseNegatives = 0;
         double currentTime = simulation.clock();
 
         for (RequestDetails request : allRequests) {
-            boolean isMalicious = detector.isAttack(request, currentTime);
+            boolean isMalicious = false;
+
+            // Call the appropriate isAttack method based on detector type
+            if (detector instanceof DDoSDetector) {
+                isMalicious = ((DDoSDetector) detector).isAttack(request, currentTime);
+            } else if (detector instanceof WekaDetector) {
+                isMalicious = ((WekaDetector) detector).isAttack(request, currentTime);
+            }
+
+            // Get ground truth (for evaluation)
+            boolean isActualAttack = request.isAttack();
+
+            // Track false positives and negatives if we know ground truth
+            if (isMalicious && !isActualAttack) {
+                falsePositives++;
+            } else if (!isMalicious && isActualAttack) {
+                falseNegatives++;
+            }
 
             if (!isMalicious) {
                 filteredCloudlets.add(request.getCloudlet());
@@ -332,20 +360,8 @@ public class Main {
         }
 
         System.out.println("DDoS detector blocked " + blockedRequests + " potentially malicious requests");
-
-        // Calculate detection metrics if you know ground truth
-        int truePositives = 0;
-        int falsePositives = 0;
-        int falseNegatives = 0;
-        int trueNegatives = 0;
-
-        // You would need to iterate through requests again and compare detector's decision
-        // against ground truth to calculate these metrics
-
-        // Print metrics
-        System.out.println("Detection accuracy: " +
-                ((truePositives + trueNegatives) * 100.0 /
-                        (truePositives + trueNegatives + falsePositives + falseNegatives)) + "%");
+        System.out.println("False positives: " + falsePositives + " (legitimate requests blocked)");
+        System.out.println("False negatives: " + falseNegatives + " (attack requests allowed)");
 
         return filteredCloudlets;
     }
